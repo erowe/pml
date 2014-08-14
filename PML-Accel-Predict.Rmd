@@ -1,0 +1,142 @@
+---
+title: "Using Machine Learning to Predict Exercise Form Using Accelerometer Data"
+output: html_document
+---
+
+Synopsis
+--------
+It is now possible to collect a large amount of data about personal activity relatively inexpensively using devices that employ accelerometers. People regularly quantify how much of a particular activity they do, but they rarely quantify how well they perform. This project uses data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. This information is that abstracted to determine if the exercise is performed correctly. This script is designed to predict the manner in which an exercise is performed. 
+
+Cite
+----
+This script is based on the information derived from the following study:
+Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. (http://groupware.les.inf.puc-rio.br/work.jsf?p1=10335) Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6. For more information: http://groupware.les.inf.puc-rio.br/har#ixzz3AHihhOEt
+
+Global Settings
+---------------
+Load all of the initial libraries required to perform this analysis and the working directory
+```{r setGlobal, echo=TRUE}
+library(knitr)
+library(caret)
+library(foreach)
+library(doSNOW)
+library(randomForest)
+setwd("D:\\Dropbox\\DataScience\\Practical Machine Learning\\Peer")
+```
+
+Data Processing
+---------------
+Read the test and training data 
+```{r readData, echo=TRUE}
+pmlTraining <- read.csv(file = "pml-training.csv", stringsAsFactors=FALSE)
+pmlTesting <- read.csv(file = "pml-testing.csv", stringsAsFactors=FALSE)
+```
+This function is designed to extract only the information that is relavent to the machine learning exercise. It was determined that the only applicable fields that would be valuable to this analysis include the columns that all fields are represented. In other words, fields with NA values were disincluded from any prediction methods. 
+``` {r trimData, echo=TRUE}
+# Remove NA, irrelavant Acceleromter Data with user data, user name, and timestamps removed
+preProc <- function(x) subset(x, select=-c(X,
+  user_name,raw_timestamp_part_1,raw_timestamp_part_2,cvtd_timestamp, 
+  new_window,num_window,kurtosis_roll_belt,kurtosis_picth_belt, 
+  kurtosis_yaw_belt,skewness_roll_belt,skewness_roll_belt.1, 
+  skewness_yaw_belt,max_roll_belt,max_picth_belt,min_roll_belt,min_pitch_belt,
+  min_yaw_belt,amplitude_roll_belt,amplitude_pitch_belt,amplitude_yaw_belt,
+  var_total_accel_belt,avg_roll_belt,stddev_roll_belt,var_roll_belt,
+  avg_pitch_belt,stddev_pitch_belt,var_pitch_belt,avg_yaw_belt,stddev_yaw_belt,
+  var_yaw_belt,var_accel_arm,avg_roll_arm,stddev_roll_arm,var_roll_arm,
+  avg_pitch_arm,stddev_pitch_arm,var_pitch_arm,avg_yaw_arm,stddev_yaw_arm,
+  var_yaw_arm,kurtosis_roll_arm,kurtosis_picth_arm,kurtosis_yaw_arm,
+  skewness_roll_arm,skewness_pitch_arm,skewness_yaw_arm,max_roll_arm,
+  max_picth_arm,max_yaw_arm,min_roll_arm,min_pitch_arm,min_yaw_arm,
+  amplitude_roll_arm,amplitude_pitch_arm,amplitude_yaw_arm,
+  kurtosis_roll_dumbbell,kurtosis_picth_dumbbell,kurtosis_yaw_dumbbell,
+  skewness_roll_dumbbell,skewness_pitch_dumbbell,skewness_yaw_dumbbell,
+  max_roll_dumbbell,max_picth_dumbbell,max_yaw_dumbbell,min_roll_dumbbell,
+  min_pitch_dumbbell,min_yaw_dumbbell,amplitude_roll_dumbbell,
+  amplitude_pitch_dumbbell,amplitude_yaw_dumbbell,var_accel_dumbbell,
+  avg_roll_dumbbell,stddev_roll_dumbbell,var_roll_dumbbell,
+  avg_pitch_dumbbell,stddev_pitch_dumbbell,var_pitch_dumbbell,
+  avg_yaw_dumbbell,stddev_yaw_dumbbell,var_yaw_dumbbell,kurtosis_roll_forearm,
+  kurtosis_picth_forearm,kurtosis_yaw_forearm,skewness_roll_forearm,
+  skewness_pitch_forearm,skewness_yaw_forearm,max_roll_forearm,max_picth_forearm,
+  max_yaw_forearm,min_roll_forearm,min_pitch_forearm,min_yaw_forearm,
+  amplitude_roll_forearm,amplitude_pitch_forearm,amplitude_yaw_forearm,
+  var_accel_forearm,avg_roll_forearm,stddev_roll_forearm,var_roll_forearm,
+  avg_pitch_forearm,stddev_pitch_forearm,var_pitch_forearm,avg_yaw_forearm,  
+  stddev_yaw_forearm,var_yaw_forearm, max_yaw_belt))
+```
+Preprocess the training and test sets by removing unecessary columns
+``` {r assignData, echo=TRUE}
+acTrain <- preProc(pmlTraining)
+acTest <- preProc(pmlTesting)
+```
+This sections establishess the class of the classe column as a factor variable
+``` {r classDefine, echo=TRUE}
+acTrain$classe <- factor(acTrain$classe, levels=c("A","B","C","D","E"))
+```
+Create a training set from the training set to do validation and 
+``` {r splitTrain, echo=TRUE}
+acDp <- createDataPartition(y = acTrain$classe, p = 0.8, list = FALSE)
+acTrain2 <- acTrain[acDp, ]
+acTest2 <- acTrain[-acDp, ]
+```
+Prediction Modeling & Cross Validation
+--------------------------------------
+This section sets the seed and creates a model using the random forest method. This method was selected because the data set is varied based on interger and numeric field types. Random forest was also selected because it can handle a large number of variables using a balanced approach. The processs is slow so I employed the DoSNOW package to process using multiple cores(threads) of execution. This model uses the cv method for cross-validation using four (4) folds.
+
+Further, an independent cross-validation is not executed because this is done as part of the random forest method. Please see this for more information about random forest cross-validation: http://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm#ooberr
+
+"The out-of-bag (oob) error estimate 
+
+In random forests, there is no need for cross-validation or a separate test set to get an unbiased estimate of the test set error. It is estimated internally, during the run, as follows: 
+
+Each tree is constructed using a different bootstrap sample from the original data. About one-third of the cases are left out of the bootstrap sample and not used in the construction of the kth tree..."
+
+```{r buildModel, echo=TRUE}
+set.seed(28203)
+cl <- makeCluster(4, type = "SOCK")
+registerDoSNOW(cl)
+modelFit <- train(classe ~ ., data = acTrain2, method = "rf", prox = TRUE,
+                  trControl = trainControl(method = "cv", number = 4, 
+                                           allowParallel = TRUE))
+stopCluster(cl)
+modelFit
+modelFit$finalModel
+```
+In-Sample Error
+---------------
+This step takes the model and applies it to the training set. The accuracy is
+1 (100%).
+```{r echo=TRUE}
+acTrain2Pred <- predict(modelFit, acTrain2)
+acTrainCM<-confusionMatrix(acTrain2Pred, acTrain2$classe)
+acTrainCM$overall[1]
+acTrainCM
+```
+Out-of-Sample Error
+-------------------
+This step now creates a prediction using the model for test data created from 
+the training set and outputs an accuracy of 0.994647 (99.5%)
+```{r echo=TRUE}
+acTest2Pred <- predict(modelFit, acTest2)
+acTestCM <- confusionMatrix(acTest2Pred, acTest2$classe)
+acTestCM$overall[1]
+acTestCM
+```
+Prediction Assignment
+---------------------
+```{r predictData, echo=TRUE}
+answers <- predict(modelFit, acTest)
+answers
+```
+This section creates the output files for the submission phase of this project
+```{r buildAnswers, echo=TRUE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(answers)
+
+```
