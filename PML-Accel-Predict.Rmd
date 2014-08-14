@@ -115,7 +115,7 @@ acTrainCM
 Out-of-Sample Error
 -------------------
 This step now creates a prediction using the model for test data created from 
-the training set and outputs an accuracy of 0.994647 (99.5%)
+the training set and outputs an accuracy of 0.9959 (99.6%)
 ```{r echo=TRUE}
 acTest2Pred <- predict(modelFit, acTest2)
 acTestCM <- confusionMatrix(acTest2Pred, acTest2$classe)
